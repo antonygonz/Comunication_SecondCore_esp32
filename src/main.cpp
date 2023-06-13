@@ -76,13 +76,21 @@ void loop2(void *parameter){
       valor = map(Potencia,0,100,7600,10);
       if (detectado)
       {
-        delayMicroseconds(valor);
+        if (Potencia==0)
+        {
+          /* code */delayMicroseconds(valor);
+        digitalWrite(pin_disparo,LOW);
+        delayMicroseconds(100);
+        digitalWrite(pin_disparo,LOW);
+        detectado=0;
+        }else{
+          delayMicroseconds(valor);
         digitalWrite(pin_disparo,HIGH);
         delayMicroseconds(100);
         digitalWrite(pin_disparo,LOW);
         detectado=0;
-
-      if(Tiempo_actual - Tiempo_previo >= Read_Delay){
+        }
+        if(Tiempo_actual - Tiempo_previo >= Read_Delay){
         Tiempo_previo += Read_Delay;                
       
       //Temperatura = 5.0*100.0*analogRead(A)/1024.0;         //Lectura del sensor LM35
@@ -222,9 +230,9 @@ void loop() {
     }else if (inputString=="STOP"){
       if (TareaCorriendo)
       {
-        Modo=1;graficar=false;Potencia=0;
+        
         vTaskSuspend(Task1);
-      }
+      }Modo=1;graficar=false;
       Potencia=0;
     }else if (inputString=="READPID"){
       Setpoint=EEPROM.get(0,Setpoint);
