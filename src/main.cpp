@@ -38,7 +38,7 @@ unsigned long Tiempo_Actual_loop1=0;
 unsigned long Tiempo_previo = 0; //variable para medir tiempo inicial
 unsigned long Tiempo_actual = 0; //variable para medir tiempo actual
 int Read_Delay = 1000;     // Periodo de muestreo en milisegundos
-int Temperatura = 0;       // Variable para medir la temperatura //CAMBIAR A DOUBLE SI SE PUEDE
+float Temperatura = 0;       // Variable para medir la temperatura //CAMBIAR A DOUBLE SI SE PUEDE
 int TempFiltro=0;//temperatura usada mientras se filtra
 float sp = 0;    //probablemendte start point CAMBIAR
 // Variables para PID
@@ -68,14 +68,14 @@ void InterrupcionCruceZero(){
 
 TaskHandle_t Task1;
 void loop2(void *parameter){
-  TareaCorriendo=true;
+  
   for(;;){
     
       Tiempo_actual = millis(); // Tiempo Actual    
       
       valor = map(Potencia,0,100,7600,10);
       if (detectado)
-      {
+      {TareaCorriendo=true;
         if (Potencia==0)
         {
           /* code */delayMicroseconds(valor);
@@ -94,7 +94,9 @@ void loop2(void *parameter){
         Tiempo_previo += Read_Delay;                
       
       //Temperatura = 5.0*100.0*analogRead(A)/1024.0;         //Lectura del sensor LM35
-
+      /*temp = bme.readTemperature();
+      temp=temp-ErorSensorEstimado;*/
+      //Temperatura=temp;
       if(Modo == 1){
         // Modo manual (lazo abierto)
         if(Tiempo_actual < Tiempo0) {
@@ -232,6 +234,7 @@ void loop() {
       {
         
         vTaskSuspend(Task1);
+        TareaCorriendo=false;
       }Modo=1;graficar=false;
       Potencia=0;
     }else if (inputString=="READPID"){
@@ -313,7 +316,7 @@ void loop() {
     //Serial.println(temp);
     if (graficar)
     {
-      graph["temp"] = temp;
+      graph["temp"] = Temperatura;
       graph["potencia"] = Potencia;
       graph["setpoint"] = Setpoint;
       serializeJson(graph, Salida_grafica);
