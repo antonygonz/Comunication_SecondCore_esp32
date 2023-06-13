@@ -6,6 +6,7 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include "Adafruit_BME680.h"
+#include <EEPROM.h>
 // Variables de la comunicacion
 String inputString = "";      // a String to hold incoming data
 bool stringComplete = false;  // whether the string is complete
@@ -15,11 +16,13 @@ int Modo = 1;  // Modo de operacion 1: Modo manual (lazo abierto)
                
 // Parametros para analisis a lazo abierto
 float Potencia_1 = 0;     // valor inicial del cambio escalon. (min = 0)
-float Potencia_2 = 50;   // Valor final del cambio escalon. (max = 100)
+float Potencia_2 = 0;   // Valor final del cambio escalon. (max = 100)
 
 // Parametros para analisis a lazo cerrado
-float Setpoint = 30;       // Setpoint
-float Kc = 8; float Tao_I = 80;// Constantes de PID
+
+float Setpoint = 35;       // Setpoint
+float Kp = 4.6726; float Tao_I = 67.70;// Constantes de PID
+float Kd=0;
 
 int Tiempo0 = 0;     // Retardo
 int SensorLM35 = 32;           // Pin A0 de entrada analogica para sensor LM35 (Variable de salida)
@@ -43,13 +46,17 @@ float PID_error = 0;
 float previous_error = 0;
 float PID_value = 0;
 float Error_INT = 0;
+bool TareaCorriendo=false;
+bool graficar=false;
 
 Adafruit_BME680 bme;
 float temp = 20;
+float ErorSensorEstimado=5;
+
 /*//variables del servidor
-const char* ssid = "XXX";
-const char* password = "XXX";
-const char* mqtt_server = "XXX";
+const char* ssid = "Ubee4987-2.4G";
+const char* password = "5C68F04987";
+const char* mqtt_server = "192.168.0.13";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -61,6 +68,7 @@ void InterrupcionCruceZero(){
 
 TaskHandle_t Task1;
 void loop2(void *parameter){
+  TareaCorriendo=true;
   for(;;){
     
       Tiempo_actual = millis(); // Tiempo Actual    
@@ -97,7 +105,7 @@ void loop2(void *parameter){
       else if (Tiempo_actual >= Tiempo0){
         PID_error = Setpoint - Temperatura;                   //Calculo del error    
         Error_INT = Error_INT + PID_error*(1000/Read_Delay);  //Calculo de la integral del error
-        PID_value = Kc*(PID_error + (1/Tao_I)*Error_INT);     //Calculo de la salida del controlador PI
+        PID_value = Kp*(PID_error + (1/Tao_I)*Error_INT);     //Calculo de la salida del controlador PI
 
         sp = Setpoint;
         
@@ -109,13 +117,7 @@ void loop2(void *parameter){
       {      PID_value = 100;    }
 
       Potencia = PID_value;   //Asignacion a la entrada de la planta.
-      }    
-      
-          Serial.print(Potencia);
-          Serial.print(" ");
-          Serial.print(Temperatura);
-          Serial.print(" ");
-          Serial.println(sp);    
+      }   
       }
       
       } //Serial.println("sEGUNDO CORE");
@@ -127,7 +129,17 @@ void loop2(void *parameter){
 unsigned long lastMsg=0;
 void setup() {
   delay(100);
-  Serial.begin(9600);//Inicializa la comunicacion
+  Serial.begin(115200);//Inicializa la comunicacion
+  /*EEPROM.put(0,Setpoint);
+  EEPROM.put(10,Kp);
+  EEPROM.put(20,Tao_I);
+  EEPROM.put(30,Kd);
+  */
+  Setpoint=EEPROM.get(0,Setpoint);
+  Kp=EEPROM.get(10,Kp);
+  Tao_I=EEPROM.get(20,Tao_I);
+  Kd=EEPROM.get(30,Kd);
+
   inputString.reserve(200);//recerba hasta 200 caracteres en la memoria para los strings de entrada
   pinMode(LED_BUILTIN, OUTPUT);//inicializa el led
   
@@ -136,7 +148,7 @@ void setup() {
   attachInterrupt(pin_cruce_cero,InterrupcionCruceZero,RISING);
 
   
-  //while (!Serial);
+  while (!Serial);
 
   if (!bme.begin()) {
     while (!bme.begin())
@@ -178,11 +190,12 @@ void setup() {
 void loop() {
   /*if (!client.connected()) {
     reconnect();
-  }
-
+  }*/
+  StaticJsonDocument<80> graph;
+  char Salida_grafica[80];
   StaticJsonDocument<80> doc;
   char output[80];
-  */
+  
   Tiempo_Actual_loop1=micros();
   if (stringComplete) {//entra si hay un string completo
     Serial.println(inputString);//Escribe en la consola el ultimo string
@@ -193,24 +206,111 @@ void loop() {
     }else if (inputString=="TEMP"){
       Serial.println(String(temp));
     }else if (inputString=="OLSTART"){
-      //vTaskSuspend(Task1);
+      if (TareaCorriendo)
+      {
+        vTaskSuspend(Task1);
+      }Potencia=0;Modo=1;graficar=true;
+      Serial.println("runing");
       xTaskCreatePinnedToCore(loop2,"Task_1",2000,NULL,1,/*intenta cambiar prioridad a 0, original 1*/&Task1,0);
     }else if (inputString=="CLSTART"){
-      //vTaskSuspend(Task1);
+      if (TareaCorriendo)
+      {
+        vTaskSuspend(Task1);
+      }Potencia=0;Modo=2;graficar=true;
+      Serial.println("runing");
       xTaskCreatePinnedToCore(loop2,"Task_1",2000,NULL,1,/*intenta cambiar prioridad a 0, original 1*/&Task1,0);
-
     }else if (inputString=="STOP"){
-      vTaskSuspend(Task1);
+      if (TareaCorriendo)
+      {
+        Modo=1;graficar=false;Potencia=0;
+        vTaskSuspend(Task1);
+      }
+      Potencia=0;
+    }else if (inputString=="READPID"){
+      Setpoint=EEPROM.get(0,Setpoint);
+      Kp=EEPROM.get(10,Kp);
+      Tao_I=EEPROM.get(20,Tao_I);
+      Kd=EEPROM.get(30,Kd);
+      Serial.print("Setpoint: ");
+      Serial.print(EEPROM.get(0,Setpoint));
+      Serial.print("\n");
+      Serial.print("Kp: ");
+      Serial.print(EEPROM.get(10,Kp));
+      Serial.print("\n");
+      Serial.print("Tao_I: ");
+      Serial.print(EEPROM.get(20,Tao_I));
+      Serial.print("\n");
+      Serial.print("Kd: ");
+      Serial.print(EEPROM.get(30,Kd));
+      Serial.print("\n");
+      
+    }else if (inputString=="graph"){
+      graficar=!graficar;
+    }else if (inputString=="STORESET"){
+      EEPROM.commit();
+      Serial.println("datos guardados");
+    }else if (inputString=="STEP"){
+      detectado=1;
+      delay(100);
+    }else if (inputString.startsWith("CHANGESETPOINT/")){
+      Serial.println("comando para cambio de SETPOINT");
+      int index = inputString.indexOf('/');
+      int length = inputString.length();
+      String SETPOINT_string = inputString.substring(index+1, length);
+      Serial.println("setpoint: "+SETPOINT_string);
+      Setpoint=SETPOINT_string.toFloat();
+      EEPROM.put(0,Setpoint);
+
+    }else if (inputString.startsWith("CHANGEPID/")&&inputString.endsWith("/")){//CHANGEPID/1/2/3/
+      Serial.println("comando para cambio de variables PID");
+      int index = inputString.indexOf('/');
+      int length = inputString.length();
+      String Numeros = inputString.substring(index+1, length);
+      Serial.println(Numeros);
+      index = Numeros.indexOf('/');
+      length = Numeros.length();
+      String Kp_string =Numeros.substring(0, index);
+      Numeros = Numeros.substring(index+1, length);
+      //Serial.println(Numeros);
+      index = Numeros.indexOf('/');
+      length = Numeros.length();
+      String Ki_string =Numeros.substring(0, index);
+      Numeros = Numeros.substring(index+1, length);
+      //Serial.println(Numeros);
+      index = Numeros.indexOf('/');
+      length = Numeros.length();
+      String Kd_string =Numeros.substring(0, index);
+      //Numeros = Numeros.substring(index+1, length);
+      //Serial.println(Numeros);
+      Serial.println("Ganancia proporcional: "+Kp_string);
+      Kp=Kp_string.toFloat();
+      EEPROM.put(10,Kp);
+      Serial.println("Ganancia integral: "+Ki_string);
+      Tao_I=Ki_string.toFloat();
+      //Tao_I=1/Tao_I;
+      EEPROM.put(20,Tao_I);
+      Serial.println("Ganancia Derivativa: "+Kd_string);
+      Kd=Kd_string.toFloat();
+      EEPROM.put(30,Kd);
     }
     inputString = "";// Borra el string:
     stringComplete = false;//Resetea la recepcion
   }
-  if (Tiempo_Actual_loop1-Tiempo_Previo_loop1>=100)
+  if (Tiempo_Actual_loop1-Tiempo_Previo_loop1>=1000000)
   {
     Tiempo_Previo_loop1=Tiempo_Actual_loop1;
     temp = bme.readTemperature();
+    temp=temp-ErorSensorEstimado;
     Temperatura=temp;
-    Serial.println(temp);
+    //Serial.println(temp);
+    if (graficar)
+    {
+      graph["temp"] = temp;
+      graph["potencia"] = Potencia;
+      graph["setpoint"] = Setpoint;
+      serializeJson(graph, Salida_grafica);
+      Serial.println(Salida_grafica);
+    }
   }
   
   /*
@@ -229,31 +329,23 @@ void loop() {
     //Serial.println(Temperatura);
     */
   
-    unsigned long now = millis();
+    /*unsigned long now = millis();
   if (now - lastMsg > 5000) {
     lastMsg = now;
     //float temp = bme.readTemperature();
     float pressure = bme.readPressure()/100.0;
     float humidity = bme.readHumidity();
     float gas = bme.readGas()/1000.0;
-    /*doc["t"] = temp;
+    doc["t"] = temp;
     doc["p"] = pressure;
     doc["h"] = humidity;
     doc["g"] = gas;
 
     serializeJson(doc, output);
-    Serial.println(output);
-    client.publish("/home/sensors", output);*/
+    //Serial.println(output);
+    //client.publish("/home/sensors", output);
+  }*/
   }
-  }
-  
-  
-  
-
-
-
-
-
 /*
   SerialEvent occurs whenever a new data comes in the hardware serial RX. This
   routine is run between each time loop() runs, so using delay inside loop can
